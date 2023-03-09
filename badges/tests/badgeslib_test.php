@@ -512,6 +512,69 @@ class core_badges_badgeslib_testcase extends advanced_testcase {
     }
 
     /**
+     * Test for working around the 61 tables join limit of mysql in award_criteria_activity in combination with the scheduled task.
+     * @return void
+     * @throws dml_transaction_exception
+     * @throws coding_exception
+     * @throws dml_exception
+     * @throws moodle_exception
+     * @throws ddl_exception
+     * @throws AssertionFailedError
+     * @throws InvalidArgumentException
+     * @throws ExpectationFailedException
+     * @covers badges/classes/badge.php review_all_criteria()
+     */
+    public function test_badge_activity_criteria_with_a_huge_number_of_coursemodules() {
+        // Messaging is not compatible with transactions.
+        $this->preventResetByRollback();
+
+        // Create more than 61 modules to potentially trigger an mysql db error.
+        $assigncount = 75;
+        $assigns = [];
+        for ($i = 1; $i <= $assigncount; $i++) {
+            $assigns[] = $this->getDataGenerator()->create_module('assign', ['course' => $this->course->id], ['completion' => 1]);
+        }
+        $assigncmids = array_flip(array_map(fn ($assign) => $assign->cmid, $assigns));
+        $criteriyactivityarray = array_fill_keys(array_keys($assigncmids), 1);
+
+        // Set completion criteria.
+        $criteriadata = (object) [
+            'id' => $this->course->id,
+            'criteria_activity' => $criteriyactivityarray,
+        ];
+        $criterion = new \completion_criteria_activity();
+        $criterion->update_config($criteriadata);
+
+        $badge = new badge($this->coursebadge);
+
+        $criteria_overall = award_criteria::build(array('criteriatype' => BADGE_CRITERIA_TYPE_OVERALL, 'badgeid' => $badge->id));
+        $criteria_overall->save(array('agg' => BADGE_CRITERIA_AGGREGATION_ANY));
+        $criteriaactivity = award_criteria::build(['criteriatype' => BADGE_CRITERIA_TYPE_ACTIVITY, 'badgeid' => $badge->id]);
+
+        $modulescrit = ['agg' => BADGE_CRITERIA_AGGREGATION_ALL];
+        foreach ($assigns as $assign) {
+            $modulescrit['module_' . $assign->cmid] = $assign->cmid;
+        }
+        $criteriaactivity->save($modulescrit);
+
+        // Mark the user to complete the modules.
+        foreach ($assigns as $assign) {
+            $cmassign = get_coursemodule_from_id('assign', $assign->cmid);
+            $completion = new \completion_info($this->course);
+            $completion->update_state($cmassign, COMPLETION_COMPLETE, $this->user->id);
+        }
+
+        // Run the scheduled task to issue the badge.
+        ob_start();
+        $task = manager::get_scheduled_task('core\task\badges_cron_task');
+        $task->execute();
+        ob_end_clean();
+
+        $this->assertDebuggingCalled('Error baking badge image!');
+        $this->assertTrue($badge->is_issued($this->user->id));
+    }
+
+    /**
      * Test badges observer when course module completion event id fired.
      */
     public function test_badges_observer_course_module_criteria_review() {
