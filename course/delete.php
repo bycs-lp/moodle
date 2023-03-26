@@ -66,9 +66,15 @@ if ($delete === md5($course->timemodified)) {
     core_php_time_limit::raise();
     // We do this here because it spits out feedback as it goes.
     delete_course($course);
-    echo $OUTPUT->heading( get_string("deletedcourse", "", $courseshortname) );
-    // Update course count in categories.
-    fix_course_sortorder();
+
+    if (empty(get_config('moodlecourse', 'enablecourseasyncdeletion'))) {
+        // Update course count in categories.
+        fix_course_sortorder();
+        echo $OUTPUT->heading( get_string("deletedcourse", "", $courseshortname) );
+    } else {
+        echo $OUTPUT->heading(get_string("deletedcourseasynchronous", "", $courseshortname));
+    }
+
     echo $OUTPUT->continue_button($categoryurl);
     echo $OUTPUT->footer();
     exit; // We must exit here!!!

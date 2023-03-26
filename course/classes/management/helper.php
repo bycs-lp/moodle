@@ -51,6 +51,11 @@ class helper {
     protected static $expandedcategories = null;
 
     /**
+     * Course deletion state - to be deleted.
+     */
+    const COURSESTATETOBEDELETED = 1;
+
+    /**
      * Returns course details in an array ready to be printed.
      *
      * @global \moodle_database $DB
@@ -626,6 +631,19 @@ class helper {
         }
         $course = new \core_course_list_element($courserecordorid);
         return self::action_course_hide($course);
+    }
+
+    /**
+     * Marks a course as 'to be deleted' with an adhoc task.
+     */
+    public static function action_course_mark_as_tobedeleted($courserecordorid) {
+        global $DB;
+        if (is_int($courserecordorid)) {
+            $courserecordorid = get_course($courserecordorid);
+        }
+
+        $courserecordorid->tobedeleted = self::COURSESTATETOBEDELETED;
+        return $DB->update_record('course', $courserecordorid);
     }
 
     /**

@@ -3142,5 +3142,29 @@ privatefiles,moodle|/user/files.php';
         upgrade_main_savepoint(true, 2023031000.02);
     }
 
+    if ($oldversion < 2023031401) {
+
+        // Define field tobedeleted to be added to course.
+        $table = new xmldb_table('course');
+        $field = new xmldb_field('tobedeleted', XMLDB_TYPE_INTEGER, '1', null, null, null, '0', 'pdfexportfont');
+
+        // Conditionally launch add field tobedeleted.
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        // Define index tobedeleted (not unique) to be added to course.
+        $index = new xmldb_index('tobedeleted', XMLDB_INDEX_NOTUNIQUE, ['tobedeleted']);
+
+        // Conditionally launch add index tobedeleted.
+        if (!$dbman->index_exists($table, $index)) {
+            $dbman->add_index($table, $index);
+        }
+
+        // Main savepoint reached.
+        upgrade_main_savepoint(true, 2023031401);
+    }
+
+
     return true;
 }
