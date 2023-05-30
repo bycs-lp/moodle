@@ -5168,6 +5168,12 @@ function remove_course_contents($courseid, $showfeedback = true, array $options 
     $DB->set_field('course_modules', 'deletioninprogress', '1', ['course' => $courseid]);
     rebuild_course_cache($courseid, true);
 
+    // Preload cmids here one time and use it later several times.
+    $cmids = [];
+    if ($cmidsresult = $DB->get_fieldset_select('course_modules', 'id', 'course = ?', [$courseid])) {
+        $cmids = $cmidsresult;
+    }
+
     // Get the list of all modules that are properly installed.
     $allmodules = $DB->get_records_menu('modules', array(), '', 'name, id');
 
@@ -5218,6 +5224,11 @@ function remove_course_contents($courseid, $showfeedback = true, array $options 
                         $DB->delete_records('course_modules', array('id' => $cm->id));
                         rebuild_course_cache($cm->course, true);
                     }
+
+                    // Be sure to get all cmids.
+                    if ($cm->id && !in_array($cm->id, $cmids)) {
+                        $cmids[] = $cm->id;
+                    }
                 }
             }
             if ($instances and $showfeedback) {
@@ -5236,10 +5247,10 @@ function remove_course_contents($courseid, $showfeedback = true, array $options 
     // Remove all data from availability and completion tables that is associated
     // with course-modules belonging to this course. Note this is done even if the
     // features are not enabled now, in case they were enabled previously.
-    $DB->delete_records_subquery('course_modules_completion', 'coursemoduleid', 'id',
-            'SELECT id from {course_modules} WHERE course = ?', [$courseid]);
-    $DB->delete_records_subquery('course_modules_viewed', 'coursemoduleid', 'id',
-        'SELECT id from {course_modules} WHERE course = ?', [$courseid]);
+    if ($cmids) {
+        $DB->delete_records_list('course_modules_completion', 'coursemoduleid', $cmids);
+        $DB->delete_records_list('course_modules_viewed', 'coursemoduleid', $cmids);
+    }
 
     // Remove course-module data that has not been removed in modules' _delete_instance callbacks.
     $cms = $DB->get_records('course_modules', array('course' => $course->id));
