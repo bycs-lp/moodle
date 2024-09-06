@@ -2265,6 +2265,11 @@ function require_login($courseorid = null, $autologinguest = true, $cm = null, $
         } else {
             $course = $DB->get_record('course', array('id' => $courseorid), '*', MUST_EXIST);
         }
+
+        if (!empty($course->deletioninprogress)) {
+            throw new moodle_exception('deletingcourseasynchronously_exception', 'core');
+        }
+
         if ($cm) {
             if ($cm->course != $course->id) {
                 throw new coding_exception('course and cm parameters in require_login() call do not match!!');
@@ -4659,11 +4664,12 @@ function set_login_session_preferences() {
  *
  * @param mixed $courseorid The id of the course or course object to delete.
  * @param bool $showfeedback Whether to display notifications of each action the function performs.
+ * @param bool $asinc Whether the course deletion should be forced.
  * @return bool true if all the removals succeeded. false if there were any failures. If this
  *             method returns false, some of the removals will probably have succeeded, and others
  *             failed, but you have no way of knowing which.
  */
-function delete_course($courseorid, $showfeedback = true) {
+function delete_course($courseorid, $showfeedback = true, $async = true) {
     global $DB, $CFG;
 
     if (is_object($courseorid)) {
@@ -4675,6 +4681,22 @@ function delete_course($courseorid, $showfeedback = true) {
             return false;
         }
     }
+
+    // Check if a backup controller for the current course exists with status < backup::STATUS_FINISHED_OK.
+    // This prevents deletion if a restore is in progress or pending.
+    // This will prevent database inconsistencies.
+    $sql = "SELECT status FROM {backup_controllers} WHERE operation = :operation AND type = :type "
+     . " AND itemid = :courseid AND status < :statusbackupfinished";
+    $params = [
+        'courseid' => $courseid,
+        'operation' => 'restore',
+        'type' => 'course',
+        'statusbackupfinished' => backup::STATUS_FINISHED_ERR,
+    ];
+    if ($DB->record_exists_sql($sql, $params)) {
+        return false;
+    }
+
     $context = context_course::instance($courseid);
 
     // Frontpage course can not be deleted!!
@@ -4696,6 +4718,20 @@ function delete_course($courseorid, $showfeedback = true) {
         course: $course,
     );
     \core\di::get(\core\hook\manager::class)->dispatch($hook);
+
+    // Eventually delete the course asynchronously.
+    if (!empty(get_config('moodlecourse', 'enablecourseasyncdeletion')) && $async) {
+        // Marks a course as to be deleted.
+        \core_course\management\helper::action_course_mark_for_deletioninprogress($course);
+
+        // Trigger an adhoc task to delete the course asynchronously .
+        $task = new \core_course\task\course_async_deletion();
+        $task->set_custom_data(['courseid' => $courseid]);
+        \core\task\manager::queue_adhoc_task($task, true);
+
+        // Early exit, because the course will be deleted later.
+        return true;
+    }
 
     // Tell the search manager we are about to delete a course. This prevents us sending updates
     // for each individual context being deleted.

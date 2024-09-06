@@ -24,6 +24,8 @@
 
 namespace core_course\management;
 
+use stdClass;
+
 defined('MOODLE_INTERNAL') || die;
 
 require_once($CFG->dirroot . '/course/lib.php');
@@ -49,6 +51,9 @@ class helper {
      * @var null|array
      */
     protected static $expandedcategories = null;
+
+    /** @var int Course deletion in progress */
+    const COURSE_DELETION_IN_PROGRESS = 1;
 
     /**
      * Returns course details in an array ready to be printed.
@@ -420,6 +425,12 @@ class helper {
             array('courseid' => $course->id, 'categoryid' => $course->category, 'sesskey' => \sesskey())
         );
         $actions = array();
+
+        // If the course is marked for deletion, no more actions should be possible.
+        if ($course->deletioninprogress == self::COURSE_DELETION_IN_PROGRESS) {
+            return $actions;
+        }
+
         // Edit.
         if ($course->can_edit()) {
             $actions[] = array(
@@ -680,6 +691,26 @@ class helper {
         }
         $course = new \core_course_list_element($courserecordorid);
         return self::action_course_hide($course);
+    }
+
+    /**
+     * Marks a course as 'to be deleted' and set it invisible.
+     *
+     * @param int|\stdClass $courserecordorid
+     * @return void
+     */
+    public static function action_course_mark_for_deletioninprogress(int|\stdClass $courserecordorid): void {
+        global $DB;
+        $course = is_int($courserecordorid) ? get_course($courserecordorid) : $courserecordorid;
+
+        // Early exit on empty course.
+        if (empty($course)) {
+            return;
+        }
+
+        $course->visible = 0;
+        $course->deletioninprogress = self::COURSE_DELETION_IN_PROGRESS;
+        $DB->update_record('course', $course);
     }
 
     /**

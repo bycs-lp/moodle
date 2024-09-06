@@ -75,10 +75,22 @@ if ($delete === md5($course->timemodified)) {
     navigation_cache::destroy_volatile_caches();
     \core\session\manager::write_close();
 
-    delete_course($course);
-    echo $OUTPUT->heading( get_string("deletedcourse", "", $courseshortname) );
-    // Update course count in categories.
-    fix_course_sortorder();
+    $response = delete_course($course);
+
+    if ($response === false) {
+        echo get_string("deletingcourseasynchronously_error");
+        echo $OUTPUT->continue_button($categoryurl);
+        exit;
+    }
+
+    if (empty(get_config('moodlecourse', 'enablecourseasyncdeletion'))) {
+        // Update course count in categories.
+        fix_course_sortorder();
+        echo $OUTPUT->heading(get_string("deletedcourse", "", $courseshortname));
+    } else {
+        echo $OUTPUT->heading(get_string("deletingcourseasynchronously", "", $courseshortname));
+    }
+
     echo $OUTPUT->continue_button($categoryurl);
     exit; // We must exit here!!!
 }

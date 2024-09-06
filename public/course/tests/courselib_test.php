@@ -30,6 +30,7 @@ use context_module;
 use context_system;
 use context_coursecat;
 use core\event\section_viewed;
+use core\exception\coding_exception as ExceptionCoding_exception;
 use core_completion_external;
 use core_external;
 use core_tag_index_builder;
@@ -38,11 +39,14 @@ use course_capability_assignment;
 use core_course_category;
 use enrol_imsenterprise\imsenterprise_test;
 use core_external\external_api;
+use Exception;
 use grade_item;
 use grading_manager;
 use moodle_exception;
 use moodle_url;
 use phpunit_util;
+use Psr\Container\NotFoundExceptionInterface;
+use Psr\Container\ContainerExceptionInterface;
 use rating_manager;
 use restore_controller;
 use stdClass;
@@ -2175,6 +2179,154 @@ final class courselib_test extends advanced_testcase {
         $this->assertSame($course->shortname, $eventdata['other']['shortname']);
 
         $this->assertEventContextNotUsed($event);
+    }
+
+    /**
+     * Test deleting a course asynchronously
+     * @covers \core_course delte_course()
+     */
+    public function test_delete_course_asynchronously(): void {
+        global $DB;
+
+        $this->resetAfterTest();
+
+        // Enable asynchroneous course deletion.
+        set_config('enablecourseasyncdeletion', true, 'moodlecourse');
+
+        // Create a course to be deleted.
+        $dg = $this->getDataGenerator();
+        $c1 = $dg->create_course();
+
+        delete_course($c1->id);
+
+        // Check that the course is still present, but the course has to be marked as to be deleted.
+        $course = $DB->get_record('course', ['id' => $c1->id]);
+        $this->assertEquals(\core_course\management\helper::COURSE_DELETION_IN_PROGRESS, $course->deletioninprogress);
+
+        // Run adhoc tasks.
+        // The task calls delete_course() which will trigger the course_deleted event and the course_content_deleted
+        // event. This function prints out data to the screen, which we do not want during a PHPUnit test,
+        // so use ob_start and ob_end_clean to prevent this.
+        ob_start();
+        $this->runAdhocTasks();
+        ob_end_clean();
+
+        // Checks if course is deleted.
+        $this->assertFalse($DB->get_record('course', ['id' => $c1->id]));
+    }
+
+    /**
+     * Test deleting a course synchronously
+     * @covers \core_course delte_course()
+     */
+    public function test_delete_course_synchronously(): void {
+        global $DB;
+
+        $this->resetAfterTest();
+
+        // Enable asynchroneous course deletion.
+        set_config('enablecourseasyncdeletion', true, 'moodlecourse');
+
+        // Create a course to be deleted.
+        $dg = $this->getDataGenerator();
+        $c1 = $dg->create_course();
+
+        delete_course($c1->id, false, false);
+
+        // Check that the course is still present, but the course has to be marked as to be deleted.
+        $course = $DB->get_record('course', ['id' => $c1->id]);
+        $this->assertFalse($course);
+
+    }
+
+    /**
+     * Testing edge cases.
+     * @covers \core_course delte_course()
+     * @return void
+     */
+    public function test_delete_course_asynchronously_special_cases(): void {
+        global $CFG, $DB, $USER;
+
+        $this->resetAfterTest();
+        $this->setAdminUser();
+
+        // Enable asynchronous course deletion.
+        set_config('enablecourseasyncdeletion', \core_course\management\helper::COURSE_DELETION_IN_PROGRESS, 'moodlecourse');
+
+        // Create two courses.
+        $dg = $this->getDataGenerator();
+        $c1 = $dg->create_course();
+        $c2 = $dg->create_course();
+
+        // Backup c2.
+        $backupid = 'test-restore-course-special-cases';
+        $tempdir = make_backup_temp_directory($backupid);
+        require_once(__DIR__ . '/../../backup/util/includes/backup_includes.php');
+        $bc = new \backup_controller(
+            \backup::TYPE_1COURSE,
+            $c2->id,
+            \backup::FORMAT_MOODLE,
+            \backup::INTERACTIVE_NO,
+            \backup::MODE_GENERAL,
+            $USER->id
+        );
+        $bc->execute_plan();
+        $results = $bc->get_results();
+        $file = $results['backup_destination'];
+        $fp = get_file_packer('application/vnd.moodle.backup');
+        $file->extract_to_pathname($fp, $tempdir);
+        $bc->destroy();
+
+        // Restore backup into c1, but do not run adhoc tasks yet.
+        require_once(__DIR__ . '/../../backup/util/includes/restore_includes.php');
+        $rc = new \restore_controller(
+            $backupid,
+            $c1->id,
+            \backup::INTERACTIVE_NO,
+            \backup::MODE_GENERAL,
+            $USER->id,
+            \backup::TARGET_EXISTING_ADDING
+        );
+        $rc->execute_precheck();
+        $rc->execute_plan();
+        $rc->destroy();
+
+        // The attribute deletioninprogress is still 0.
+        $course1 = $DB->get_record('course', ['id' => $c1->id]);
+        $this->assertEquals(0, $course1->deletioninprogress);
+
+        // No course_async_deletion adhoc task scheduled.
+        $tasks = $DB->get_records(
+            'task_adhoc',
+            ['classname' => '\core_course\task\course_async_deletion']
+        );
+        $this->assertEmpty($tasks);
+
+        // Now delete c1 (should schedule async deletion).
+        delete_course($c1->id);
+
+        // The Attribute deletioninprogress is now 1.
+        $course1 = $DB->get_record('course', ['id' => $c1->id]);
+        $this->assertEquals(\core_course\management\helper::COURSE_DELETION_IN_PROGRESS, $course1->deletioninprogress);
+
+        // The course_async_deletion adhoc task is scheduled.
+        $tasks = $DB->get_records(
+            'task_adhoc',
+            ['classname' => '\core_course\task\course_async_deletion']
+        );
+        $this->assertCount(1, $tasks);
+
+        // Require_login($course) throws exception.
+        $this->expectException(\moodle_exception::class);
+        require_login($course1);
+
+        // Run adhoc tasks to finish deletion.
+        ob_start();
+        $this->runAdhocTasks();
+        ob_end_clean();
+
+        // Course is no longer in DB.
+        $this->assertFalse($DB->get_record('course', ['id' => $c1->id]));
     }
 
     /**
