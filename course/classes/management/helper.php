@@ -24,6 +24,8 @@
 
 namespace core_course\management;
 
+use stdClass;
+
 defined('MOODLE_INTERNAL') || die;
 
 require_once($CFG->dirroot . '/course/lib.php');
@@ -49,6 +51,12 @@ class helper {
      * @var null|array
      */
     protected static $expandedcategories = null;
+
+    /** @var int Course to be deleted */
+    const COURSE_STATE_TO_BE_DELETED = 1;
+
+    /** @var int Instant deletion marker */
+    const COURSE_STATE_INSTANT_DELETION = 0;
 
     /**
      * Returns course details in an array ready to be printed.
@@ -366,6 +374,12 @@ class helper {
             array('courseid' => $course->id, 'categoryid' => $course->category, 'sesskey' => \sesskey())
         );
         $actions = array();
+
+        // If the course is marked for deletion, no more actions should be possible.
+        if ($course->tobedeleted == self::COURSE_STATE_TO_BE_DELETED) {
+            return $actions;
+        }
+
         // Edit.
         if ($course->can_edit()) {
             $actions[] = array(
@@ -626,6 +640,26 @@ class helper {
         }
         $course = new \core_course_list_element($courserecordorid);
         return self::action_course_hide($course);
+    }
+
+    /**
+     * Marks a course as 'to be deleted' and set it invisible.
+     *
+     * @param int|\stdClass $courserecordorid
+     * @return void
+     */
+    public static function action_course_mark_as_tobedeleted(int|\stdClass $courserecordorid): void {
+        global $DB;
+        $course = is_int($courserecordorid) ? get_course($courserecordorid) : $courserecordorid;
+
+        // Early exit on empty course.
+        if (empty($course)) {
+            return;
+        }
+
+        $course->visible = 0;
+        $course->tobedeleted = self::COURSE_STATE_TO_BE_DELETED;
+        $DB->update_record('course', $course);
     }
 
     /**
