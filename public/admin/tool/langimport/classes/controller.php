@@ -46,6 +46,8 @@ class controller {
     private $installer;
     /** @var array languages available on the remote server */
     public $availablelangs;
+    /** @var array list of language codes that were successfully updated */
+    private $updatedlangs;
 
     /**
      * Constructor.
@@ -56,7 +58,8 @@ class controller {
 
         $this->info = array();
         $this->errors = array();
-        $this->installer = new \lang_installer();
+        $this->updatedlangs = [];
+        $this->installer = \core\di::get(\lang_installer::class);
 
         $this->availablelangs = $this->installer->get_remote_list_of_languages();
     }
@@ -85,16 +88,15 @@ class controller {
      *
      * @param string|array $langs array of langcodes or individual langcodes
      * @param bool $updating true if updating the langpacks
-     * @return int false if an error encountered or
+     * @return int number of successfully installed/updated language packs
      * @throws \moodle_exception when error is encountered installing langpack
      */
     public function install_languagepacks($langs, $updating = false) {
         global $CFG;
 
+        $this->updatedlangs = [];
         $this->installer->set_queue($langs);
         $results = $this->installer->run();
-
-        $updatedpacks = 0;
 
         foreach ($results as $langcode => $langstatus) {
             switch ($langstatus) {
@@ -106,7 +108,7 @@ class controller {
                     throw new \moodle_exception('remotedownloaderror', 'error', '', $a);
                     break;
                 case \lang_installer::RESULT_INSTALLED:
-                    $updatedpacks++;
+                    $this->updatedlangs[] = $langcode;
                     if ($updating) {
                         event\langpack_updated::event_with_langcode($langcode)->trigger();
                         $this->info[] = get_string('langpackupdated', 'tool_langimport', $langcode);
@@ -121,7 +123,7 @@ class controller {
             }
         }
 
-        return $updatedpacks;
+        return count($this->updatedlangs);
     }
 
     /**
@@ -214,15 +216,26 @@ class controller {
             }
         }
 
+        // Fire event before starting the language pack update.
+        event\langpacks_update_started::event_with_langs($neededlangs)->trigger();
+
         try {
-            $updated = $this->install_languagepacks($neededlangs, true);
+            $this->install_languagepacks($neededlangs, true);
         } catch (\moodle_exception $e) {
             $this->errors[] = 'An exception occurred while installing language packs: ' . $e->getMessage();
-            return false;
         }
 
-        if ($updated) {
+        if (!empty($this->updatedlangs)) {
             $this->info[] = get_string('langupdatecomplete', 'tool_langimport');
+
+            // Dispatch hook with structured update results before purging the string cache.
+            $hook = new \tool_langimport\hook\after_langpacks_updated(
+                updatedlangs: $this->updatedlangs,
+                requestedlangs: $neededlangs,
+                errors: $this->errors,
+            );
+            \core\di::get(\core\hook\manager::class)->dispatch($hook);
+
             // The strings have been changed so we need to purge their cache to ensure users see the changes.
             get_string_manager()->reset_caches();
         } else {

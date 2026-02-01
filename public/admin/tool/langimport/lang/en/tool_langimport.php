@@ -37,6 +37,7 @@ $string['langpackinstalledevent'] = 'Language pack installed';
 $string['langpackremoved'] = 'Language pack \'{$a}\' was uninstalled';
 $string['langpacknotremoved'] = 'An error has occurred; language pack \'{$a}\' is not completely uninstalled. Please check file permissions.';
 $string['langpackremovedevent'] = 'Language pack uninstalled';
+$string['langpacksupdatestartedevent'] = 'Language packs update started';
 $string['langpackupdateskipped'] = 'Update of \'{$a}\' language pack skipped';
 $string['langpackuptodate'] = 'Language pack \'{$a}\' is up-to-date';
 $string['langpackupdated'] = 'Language pack \'{$a}\' was successfully updated';

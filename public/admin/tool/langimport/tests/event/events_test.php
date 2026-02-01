@@ -103,4 +103,35 @@ final class events_test extends \advanced_testcase {
         $this->expectExceptionMessage("The 'langcode' value must be set to a valid language code");
         \tool_langimport\event\langpack_removed::event_with_langcode('broken langcode');
     }
+
+    /**
+     * Test the langpacks_update_started event.
+     *
+     * @covers \tool_langimport\event\langpacks_update_started
+     */
+    public function test_langpacks_update_started(): void {
+        $event = \tool_langimport\event\langpacks_update_started::event_with_langs(['de', 'fr']);
+
+        // Trigger and capture the event.
+        $sink = $this->redirectEvents();
+        $event->trigger();
+        $events = $sink->get_events();
+        $event = reset($events);
+
+        $this->assertInstanceOf('\tool_langimport\event\langpacks_update_started', $event);
+        $this->assertEquals(\context_system::instance(), $event->get_context());
+        $this->assertSame(['de', 'fr'], $event->other['langs']);
+    }
+
+    /**
+     * Test the langpacks_update_started event validation with invalid language codes.
+     *
+     * @covers \tool_langimport\event\langpacks_update_started
+     */
+    public function test_langpacks_update_started_validation(): void {
+
+        $this->expectException('coding_exception');
+        $this->expectExceptionMessage("The 'langs' array contains an invalid language code");
+        \tool_langimport\event\langpacks_update_started::event_with_langs(['broken langcode']);
+    }
 }
