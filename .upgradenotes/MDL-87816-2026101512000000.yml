@@ -1,0 +1,16 @@
+issueNumber: MDL-87816
+notes:
+  tool_langimport:
+    - message: >-
+        A new `\tool_langimport\event\langpacks_update_started` event is
+        triggered before installed language packs are updated, and a new
+        `\tool_langimport\hook\after_langpacks_updated` hook is dispatched after
+        the update, before the string cache is purged. The hook provides the
+        updated and requested language codes as well as any errors.
+      type: improved
+    - message: >-
+        `\tool_langimport\controller::update_all_installed_languages()` no
+        longer returns `false` when an error occurs during the update. Language
+        packs updated before the error are now reported and the string cache is
+        purged. Errors are still available in the `errors` property.
+      type: changed
